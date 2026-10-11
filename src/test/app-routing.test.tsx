@@ -1,22 +1,28 @@
-import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { routeTree } from "@/routeTree.gen";
 
-function renderAt(path: string) {
-  const queryClient = new QueryClient();
+// The root route renders a full <html> shell, which React cannot mount inside
+// testing-library's default <div> container, so render into the document itself.
+async function renderAt(path: string) {
   const router = createRouter({
     routeTree,
-    context: { queryClient },
     history: createMemoryHistory({ initialEntries: [path] }),
   });
-  return render(<RouterProvider router={router} />);
+  await router.load();
+  await act(async () => {
+    render(<RouterProvider router={router} />, {
+      container: document as unknown as HTMLElement,
+    });
+  });
+  return router;
 }
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   vi.restoreAllMocks();
 });
 
@@ -24,16 +30,16 @@ afterEach(() => {
 // routes are rewritten as the app is built and this must keep passing.
 describe("App routing", () => {
   it("renders the index route", async () => {
-    const { container } = renderAt("/");
+    await renderAt("/");
 
-    await waitFor(() => expect(container.firstChild).not.toBeNull());
+    expect(document.body.firstElementChild).not.toBeNull();
   });
 
   it("renders the not-found route", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
-    const { container } = renderAt("/this-route-does-not-exist");
+    await renderAt("/this-route-does-not-exist");
 
-    await waitFor(() => expect(container.firstChild).not.toBeNull());
+    expect(document.body.firstElementChild).not.toBeNull();
   });
 });

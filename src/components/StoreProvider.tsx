@@ -1,174 +1,122 @@
-import {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  useCallback,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import {
-  Menu,
-  Search,
-  ShoppingBag,
-  X,
-  Minus,
-  Plus,
-  ArrowRight,
-  Check,
-} from "lucide-react";
+import { ArrowRight, Check, Heart, Menu, Minus, Plus, Search, ShoppingBag, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { formatPrice, products, type Product } from "@/lib/products";
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-type CartItem = {
-  key: string;
-  product: Product;
-  size: string;
-  color: string;
-  quantity: number;
-};
+import {
+  NEW_ARRIVALS,
+  formatPrice,
+  productById,
+  productCategories,
+  products,
+  type Product,
+} from "@/lib/products";
+import { readStored, storedCartSchema, storedIdsSchema, writeStored } from "@/lib/storage";
+import { StoreContext, type CartItem } from "@/lib/store-context";
 
 type Toast = { id: number; message: string };
 
-type StoreContextValue = {
-  items: CartItem[];
-  openCart: () => void;
-  addItem: (product: Product, size: string, color: string) => void;
-  wishlist: number[];
-  toggleWishlist: (id: number) => void;
-};
-
-const StoreContext = createContext<StoreContextValue | null>(null);
-
-export function useStore() {
-  const store = useContext(StoreContext);
-  if (!store) throw new Error("Store unavailable");
-  return store;
-}
-
-// ---------------------------------------------------------------------------
-// LocalStorage helpers
-// ---------------------------------------------------------------------------
-
 const CART_KEY = "kalchar_cart";
 const WISHLIST_KEY = "kalchar_wishlist";
+const RECENT_KEY = "kalchar_recently_viewed";
+const MAX_TOASTS = 3;
+const MAX_RECENT = 8;
+
+const cartKey = (productId: number, size: string, color: string) => `${productId}-${size}-${color}`;
 
 function loadCart(): CartItem[] {
-  try {
-    const raw = localStorage.getItem(CART_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as {
-      productId: number;
-      size: string;
-      color: string;
-      quantity: number;
-    }[];
-    return parsed
-      .map((entry) => {
-        const product = products.find((p) => p.id === entry.productId);
-        if (!product) return null;
-        return {
-          key: `${entry.productId}-${entry.size}-${entry.color}`,
-          product,
-          size: entry.size,
-          color: entry.color,
-          quantity: entry.quantity,
-        } as CartItem;
-      })
-      .filter(Boolean) as CartItem[];
-  } catch {
-    return [];
-  }
+  return readStored(CART_KEY, storedCartSchema, []).flatMap((entry) => {
+    const product = productById(entry.productId);
+    if (!product || !product.sizes.includes(entry.size) || !product.colors.includes(entry.color))
+      return [];
+    return [
+      {
+        key: cartKey(product.id, entry.size, entry.color),
+        product,
+        size: entry.size,
+        color: entry.color,
+        quantity: entry.quantity,
+      },
+    ];
+  });
 }
 
-function saveCart(items: CartItem[]) {
-  try {
-    localStorage.setItem(
-      CART_KEY,
-      JSON.stringify(
-        items.map((item) => ({
-          productId: item.product.id,
-          size: item.size,
-          color: item.color,
-          quantity: item.quantity,
-        })),
-      ),
-    );
-  } catch {
-    /* quota exceeded — silently degrade */
-  }
-}
-
-function loadWishlist(): number[] {
-  try {
-    const raw = localStorage.getItem(WISHLIST_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveWishlist(ids: number[]) {
-  try {
-    localStorage.setItem(WISHLIST_KEY, JSON.stringify(ids));
-  } catch {
-    /* silently degrade */
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Provider
-// ---------------------------------------------------------------------------
-
-const categoriesMenu = [
-  "Dresses",
-  "Tops",
-  "Tailoring",
-  "Outerwear",
-  "Accessories",
+const loadIds = (key: string) => [
+  ...new Set(readStored(key, storedIdsSchema, []).filter((id) => productById(id))),
 ];
 
+const menuCategories = [NEW_ARRIVALS, ...productCategories];
+
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [items, setItems] = useState<CartItem[]>(() => loadCart());
+  // Start empty on both server and client; saved state loads after mount to avoid hydration mismatches.
+  const [hydrated, setHydrated] = useState(false);
+  const [items, setItems] = useState<CartItem[]>([]);
+  const [wishlist, setWishlist] = useState<number[]>([]);
+  const [recentlyViewed, setRecentlyViewed] = useState<number[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
+  const [wishlistOpen, setWishlistOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [wishlist, setWishlist] = useState<number[]>(() => loadWishlist());
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastId = useRef(0);
 
-  // Persist cart to localStorage on every change
   useEffect(() => {
-    saveCart(items);
-  }, [items]);
+    setItems(loadCart());
+    setWishlist(loadIds(WISHLIST_KEY));
+    setRecentlyViewed(loadIds(RECENT_KEY).slice(0, MAX_RECENT));
+    setHydrated(true);
+  }, []);
 
-  // Persist wishlist to localStorage on every change
   useEffect(() => {
-    saveWishlist(wishlist);
-  }, [wishlist]);
+    if (!hydrated) return;
+    writeStored(
+      CART_KEY,
+      items.map(({ product, size, color, quantity }) => ({
+        productId: product.id,
+        size,
+        color,
+        quantity,
+      })),
+    );
+  }, [items, hydrated]);
 
-  // Toast helper
+  useEffect(() => {
+    if (hydrated) writeStored(WISHLIST_KEY, wishlist);
+  }, [wishlist, hydrated]);
+
+  useEffect(() => {
+    if (hydrated) writeStored(RECENT_KEY, recentlyViewed);
+  }, [recentlyViewed, hydrated]);
+
+  const anyPanelOpen = cartOpen || wishlistOpen || menuOpen || searchOpen;
+  useEffect(() => {
+    if (!anyPanelOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setCartOpen(false);
+      setWishlistOpen(false);
+      setMenuOpen(false);
+      setSearchOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [anyPanelOpen]);
+
   const showToast = useCallback((message: string) => {
-    const id = Date.now();
-    setToasts((prev) => [...prev, { id, message }]);
-    setTimeout(() => {
+    const id = ++toastId.current;
+    setToasts((prev) => [...prev, { id, message }].slice(-MAX_TOASTS));
+    window.setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 2800);
   }, []);
 
   const addItem = useCallback(
     (product: Product, size: string, color: string) => {
-      const key = `${product.id}-${size}-${color}`;
+      const key = cartKey(product.id, size, color);
       setItems((current) =>
         current.some((item) => item.key === key)
           ? current.map((item) =>
-              item.key === key
-                ? { ...item, quantity: item.quantity + 1 }
-                : item,
+              item.key === key ? { ...item, quantity: Math.min(99, item.quantity + 1) } : item,
             )
           : [...current, { key, product, size, color, quantity: 1 }],
       );
@@ -182,9 +130,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setItems((current) =>
       current
         .map((item) =>
-          item.key === key
-            ? { ...item, quantity: item.quantity + delta }
-            : item,
+          item.key === key ? { ...item, quantity: Math.min(99, item.quantity + delta) } : item,
         )
         .filter((item) => item.quantity > 0),
     );
@@ -192,36 +138,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const toggleWishlist = useCallback(
     (id: number) => {
+      const product = productById(id);
+      const saved = wishlist.includes(id);
       setWishlist((current) =>
-        current.includes(id)
-          ? current.filter((value) => value !== id)
-          : [...current, id],
+        current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
       );
-      const product = products.find((p) => p.id === id);
       if (product) {
-        const isAdding = !wishlist.includes(id);
         showToast(
-          isAdding
-            ? `${product.name} saved to wishlist`
-            : `${product.name} removed from wishlist`,
+          saved ? `${product.name} removed from wishlist` : `${product.name} saved to wishlist`,
         );
       }
     },
     [wishlist, showToast],
   );
 
+  const markViewed = useCallback((id: number) => {
+    setRecentlyViewed((current) =>
+      [id, ...current.filter((value) => value !== id)].slice(0, MAX_RECENT),
+    );
+  }, []);
+
   const count = items.reduce((sum, item) => sum + item.quantity, 0);
-  const subtotal = items.reduce(
-    (sum, item) => sum + item.quantity * item.product.price,
-    0,
-  );
+  const subtotal = items.reduce((sum, item) => sum + item.quantity * item.product.price, 0);
   const results = products
     .filter((product) =>
-      `${product.name} ${product.category}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
+      `${product.name} ${product.category}`.toLowerCase().includes(query.toLowerCase()),
     )
     .slice(0, 5);
+  const wishlistProducts = wishlist.flatMap((id) => productById(id) ?? []);
 
   return (
     <StoreContext.Provider
@@ -231,15 +175,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         addItem,
         wishlist,
         toggleWishlist,
+        recentlyViewed,
+        markViewed,
       }}
     >
-      {/* Announcement bar */}
       <div className="announcement">
-        A NEW SEASON OF EXPRESSION{" "}
-        <span className="mx-3">·</span> COMPLIMENTARY SHIPPING OVER $200
+        A NEW SEASON OF EXPRESSION <span className="mx-3">·</span> COMPLIMENTARY SHIPPING OVER $200
       </div>
 
-      {/* Header */}
       <header className="site-header">
         <div className="header-inner">
           <div className="header-left">
@@ -254,7 +197,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             </Button>
             <nav className="desktop-nav">
               <Link to="/shop">SHOP</Link>
-              <Link to="/shop" search={{ category: "Dresses" }}>
+              <Link to="/shop" search={{ category: NEW_ARRIVALS }}>
                 NEW ARRIVALS
               </Link>
             </nav>
@@ -274,7 +217,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             <Button
               variant="ghost"
               size="icon"
-              aria-label={`Open bag, ${count} items`}
+              aria-label={`Open wishlist, ${wishlist.length} saved`}
+              onClick={() => setWishlistOpen(true)}
+              className="relative"
+            >
+              <Heart />
+              {wishlist.length > 0 && <span className="bag-count">{wishlist.length}</span>}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={`Open bag, ${count} ${count === 1 ? "item" : "items"}`}
               onClick={() => setCartOpen(true)}
               className="relative"
             >
@@ -285,10 +238,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      {/* Main content */}
       {children}
 
-      {/* Footer */}
       <footer className="site-footer">
         <div className="footer-grid">
           <div>
@@ -298,8 +249,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           <div>
             <h3>EXPLORE</h3>
             <Link to="/shop">Shop all</Link>
-            <Link to="/shop" search={{ category: "Dresses" }}>
-              Dresses
+            <Link to="/shop" search={{ category: NEW_ARRIVALS }}>
+              New arrivals
             </Link>
             <Link to="/shop" search={{ category: "Accessories" }}>
               Accessories
@@ -323,13 +274,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         </div>
       </footer>
 
-      {/* ---- Overlays / Drawers ---- */}
-
-      {/* Mobile menu */}
       {menuOpen && (
         <div className="overlay" onClick={() => setMenuOpen(false)}>
           <aside
             className="side-panel left-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Menu"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="panel-heading">
@@ -350,7 +301,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               <Link to="/shop" onClick={() => setMenuOpen(false)}>
                 Shop all <ArrowRight size={18} />
               </Link>
-              {categoriesMenu.map((category) => (
+              {menuCategories.map((category) => (
                 <Link
                   key={category}
                   to="/shop"
@@ -366,11 +317,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      {/* Search panel */}
       {searchOpen && (
         <div className="overlay" onClick={() => setSearchOpen(false)}>
           <aside
             className="side-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Search"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="panel-heading">
@@ -387,6 +340,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             <input
               className="search-input"
               autoFocus
+              aria-label="Search products"
               placeholder="What are you looking for?"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -418,11 +372,86 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      {/* Cart drawer */}
+      {wishlistOpen && (
+        <div className="overlay" onClick={() => setWishlistOpen(false)}>
+          <aside
+            className="side-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Wishlist"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="panel-heading">
+              <h2>
+                Wishlist <span>({wishlistProducts.length})</span>
+              </h2>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Close wishlist"
+                onClick={() => setWishlistOpen(false)}
+              >
+                <X />
+              </Button>
+            </div>
+            {wishlistProducts.length ? (
+              <div className="cart-items">
+                {wishlistProducts.map((product) => (
+                  <div className="cart-item" key={product.id}>
+                    <Link
+                      to="/product/$id"
+                      params={{ id: String(product.id) }}
+                      onClick={() => setWishlistOpen(false)}
+                    >
+                      <img src={product.image} alt={product.name} />
+                    </Link>
+                    <div>
+                      <Link
+                        to="/product/$id"
+                        params={{ id: String(product.id) }}
+                        onClick={() => setWishlistOpen(false)}
+                        className="cart-name"
+                      >
+                        {product.name}
+                      </Link>
+                      <p>{formatPrice(product.price)}</p>
+                      <div className="wishlist-actions">
+                        <Link
+                          to="/product/$id"
+                          params={{ id: String(product.id) }}
+                          onClick={() => setWishlistOpen(false)}
+                        >
+                          CHOOSE SIZE
+                        </Link>
+                        <button type="button" onClick={() => toggleWishlist(product.id)}>
+                          REMOVE
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-cart">
+                <Heart size={32} strokeWidth={1} />
+                <h3>Nothing saved yet</h3>
+                <p>Tap the heart on any piece to keep it here for later.</p>
+                <Button asChild onClick={() => setWishlistOpen(false)}>
+                  <Link to="/shop">FIND SOMETHING YOU LOVE</Link>
+                </Button>
+              </div>
+            )}
+          </aside>
+        </div>
+      )}
+
       {cartOpen && (
         <div className="overlay" onClick={() => setCartOpen(false)}>
           <aside
             className="side-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Shopping bag"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="panel-heading">
@@ -448,10 +477,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         params={{ id: String(item.product.id) }}
                         onClick={() => setCartOpen(false)}
                       >
-                        <img
-                          src={item.product.image}
-                          alt={item.product.name}
-                        />
+                        <img src={item.product.image} alt={item.product.name} />
                       </Link>
                       <div>
                         <Link
@@ -495,18 +521,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     <strong>{formatPrice(subtotal)}</strong>
                   </div>
                   <p>Shipping and taxes calculated at checkout.</p>
-                  <Button
-                    className="w-full h-12"
-                    disabled
-                    title="Checkout coming soon"
-                  >
+                  <Button className="w-full h-12" disabled title="Checkout coming soon">
                     CHECKOUT COMING SOON
                   </Button>
-                  <Link
-                    to="/shop"
-                    onClick={() => setCartOpen(false)}
-                    className="continue-link"
-                  >
+                  <Link to="/shop" onClick={() => setCartOpen(false)} className="continue-link">
                     CONTINUE SHOPPING
                   </Link>
                 </div>
@@ -525,7 +543,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      {/* Toast notifications */}
       <div className="toast-container" aria-live="polite">
         {toasts.map((toast) => (
           <div key={toast.id} className="toast">

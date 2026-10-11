@@ -1,65 +1,60 @@
-# KALCHAR — Modern Streetwear & Y2K Archives
+# KALCHAR — Streetwear, Y2K Archives & Techwear
 
-Welcome to the **KALCHAR** e-commerce frontend. This project is a highly dynamic, Gen-Z focused streetwear and Y2K aesthetic clothing brand platform.
+The **KALCHAR** storefront: a Gen-Z streetwear and Y2K-inspired fashion shop. This is the frontend only — there is no backend yet, so the bag, wishlist and recently-viewed list live in the browser and checkout is disabled.
 
-Built for high performance and an immaculate user experience, KALCHAR leverages modern web technologies to deliver a flawless shopping experience.
+## Features
 
-![Kalchar Preview](https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=1200&q=80)
+- **Product catalog:** 55 pieces across streetwear, Y2K archives, techwear, outerwear, tops, bottoms, knitwear, shoes and accessories.
+- **Shop filters and sorting:** filter by category (including New Arrivals), size, colour and price, with removable filter chips. The filter options are generated from the catalog, so every option matches real products.
+- **Product pages:** colour swatches that swap the gallery, hover zoom, size guide (clothing and shoes), sold-out sizes, a sticky add-to-bag bar on mobile and a recently-viewed strip.
+- **Quick view:** pick a colour and size and add to bag from any product card without leaving the grid.
+- **Bag and wishlist:** saved in `localStorage` and validated on load, so corrupt data falls back to an empty state instead of breaking the page.
+- **Responsive layout** for desktop, tablet and mobile.
 
-## 🚀 Features
+## Tech stack
 
-- **Dynamic Product Catalog:** Features 50 unique items curated with a streetwear, Y2K, and techwear aesthetic.
-- **Client-Side Persistence:** LocalStorage-based robust Cart and Wishlist functionality that remembers your items across sessions.
-- **Rich Aesthetics:** Modern typography, subtle micro-animations, glassmorphism hints, and a tailored color palette built entirely with custom CSS.
-- **Responsive Layout:** fully optimized grids and flexbox layouts that scale perfectly across desktop, tablet, and mobile displays.
-- **Product Details (PDP):** Interactive color swatches with instant image swapping, size guide modals, and "add to cart" toasts.
-- **New Arrivals Showcase:** A 5-column grid layout exclusively highlighting the freshest drops on the home page.
-- **Instant Filtering & Sorting:** Category filters dynamically update the main shop catalog without page reloads.
+- **Framework:** [React 19](https://react.dev) with [TanStack Start](https://tanstack.com/start) (SSR) on [Vite](https://vitejs.dev/)
+- **Routing:** [TanStack Router](https://tanstack.com/router) (file-based)
+- **Styling:** [Tailwind CSS v4](https://tailwindcss.com/) and [shadcn/ui](https://ui.shadcn.com/) primitives, plus custom CSS in `src/styles.css`
+- **Validation:** [Zod](https://zod.dev) for the catalog and stored state
+- **Icons:** [Lucide](https://lucide.dev/)
+- **Tests:** [Vitest](https://vitest.dev/) and Testing Library
 
-## 🛠️ Tech Stack
+## Development
 
-- **Framework:** [React 18](https://react.dev) via [TanStack Start](https://tanstack.com/start) / [Vite](https://vitejs.dev/)
-- **Routing:** [TanStack Router](https://tanstack.com/router) (file-based routing)
-- **Language:** TypeScript
-- **Styling:** Custom CSS with [Tailwind CSS v4](https://tailwindcss.com/) integration for utility basics.
-- **Icons:** [Lucide React](https://lucide.dev/)
-
-## 💻 Development
-
-### Prerequisites
-
-You need Node.js (v18+) and npm installed.
-
-### Setup
+Requires **Node.js 22.12+** and **npm** (the project uses `package-lock.json`; do not commit other lockfiles).
 
 ```sh
-# 1. Clone the repository
 git clone https://github.com/adityafilesx/Kalchar.git
-
-# 2. Navigate to the project directory
 cd Kalchar
-
-# 3. Install dependencies
-npm install
-
-# 4. Start the development server
+nvm use      # reads .nvmrc (Node 22.12)
+npm ci
 npm run dev
 ```
 
-The app will be available at `http://localhost:8080` (or another port if 8080 is taken).
+The app runs at `http://localhost:8080` (or the next free port).
 
-## 📁 Project Structure
+| Command          | What it does                   |
+| ---------------- | ------------------------------ |
+| `npm run dev`    | Start the dev server           |
+| `npm run build`  | Production build               |
+| `npm test`       | Run the test suite             |
+| `npm run lint`   | Lint and check formatting      |
+| `npm run format` | Format all files with Prettier |
 
-- `src/routes/`: Contains the file-based routes (`index.tsx` for home, `shop.tsx` for the catalog, `product.$id.tsx` for the PDP).
-- `src/components/`: Reusable React components (e.g., `ProductCard.tsx`, `StoreProvider.tsx` for global state).
-- `src/lib/`: Core utilities and data definitions, including the robust `products.ts` catalog.
-- `src/styles.css`: The global stylesheet handling the complex grid layouts and theming.
+## Project structure
 
-## 🤝 Integration with Lovable
+- `src/routes/` — file-based routes: `index.tsx` (home), `shop.tsx` (catalog), `product.$id.tsx` (product page).
+- `src/components/` — `StoreProvider.tsx` (header, footer, bag, wishlist, search), `ProductCard.tsx`, `QuickView.tsx`, `ProductOptions.tsx` and shadcn primitives in `ui/`.
+- `src/data/products.json` — the catalog data. Each product has a stable `id`; images are paths under `public/`.
+- `src/lib/products.ts` — validates the catalog and derives categories, sizes, colours and price bounds from it.
+- `src/lib/storage.ts` — validated `localStorage` reads and writes.
+- `public/products/` — self-hosted product images.
 
-*Note: This project is connected to [Lovable](https://lovable.dev).* 
-- Commits pushed to the `main` branch sync back to Lovable and show up in the editor.
-- **Important:** Avoid rewriting published git history (force pushing, rebasing, amending, or squashing pushed commits) to prevent losing project history on Lovable's side.
+### Adding a product
 
----
-*Stay Funky. Stay Y2K. Welcome to KALCHAR.*
+Add an entry to `src/data/products.json` with the next unused `id`, put its images in `public/products/`, and run `npm test` — the tests check that ids are unique and every image file exists.
+
+## Lovable
+
+This project is connected to [Lovable](https://lovable.dev). Commits pushed to `main` sync back to the Lovable editor, so keep `main` working, and never rewrite pushed history (no force pushes, rebases, amends or squashes of pushed commits).
